@@ -16,3 +16,11 @@ lint:
 check-plugins:
 	/usr/lib/nagios/plugins/check_http -H example.com
 	/usr/lib/nagios/plugins/check_disk -w 20% -c 10% -p /
+
+.PHONY: bootstrap verify
+
+bootstrap:
+	./scripts/bootstrap-dev.sh
+
+verify:
+	./scripts/verify-dev.sh

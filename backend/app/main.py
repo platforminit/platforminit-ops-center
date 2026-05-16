@@ -6,7 +6,10 @@ from app.api.checks import (
     CheckHistoryResponse,
     CommentRequest,
     CommentResponse,
+    CreateDowntimeRequest,
+    CreateDowntimeResponse,
     LatestResultsResponse,
+    ListDowntimesResponse,
     ProblemsResponse,
     RunCheckRequest,
     RunCheckResponse,
@@ -17,8 +20,10 @@ from app.api.checks import (
     acknowledge_check,
     add_comment,
     check_history,
+    create_downtime,
     latest_results,
     list_checks,
+    list_downtimes,
     list_problems,
     run_check,
     run_registered_check,
@@ -86,3 +91,17 @@ def checks_comments(
     check_id: str, payload: CommentRequest
 ) -> CommentResponse:
     return add_comment(check_id, payload)
+
+
+@app.post("/api/v1/checks/{check_id}/downtimes", response_model=CreateDowntimeResponse)
+def checks_create_downtime(
+    check_id: str, payload: CreateDowntimeRequest
+) -> CreateDowntimeResponse:
+    return create_downtime(check_id, payload)
+
+
+@app.get("/api/v1/checks/{check_id}/downtimes", response_model=ListDowntimesResponse)
+def checks_list_downtimes(
+    check_id: str,
+) -> ListDowntimesResponse:
+    return list_downtimes(check_id)

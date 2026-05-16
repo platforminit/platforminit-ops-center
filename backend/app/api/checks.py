@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Mapping
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.runner.nagios import run_nagios_plugin
 from app.runner.models import PluginResult
@@ -23,9 +24,16 @@ from app.store.check_results import (
     persist_check_result,
     persist_comment,
 )
+from app.store.downtimes import (
+    DowntimeRecord,
+    get_downtime_map,
+    get_downtimes,
+    persist_downtime,
+)
 
 ALLOWED_PLUGIN_DIR = PurePosixPath("/usr/lib/nagios/plugins")
 ALLOWED_PREFIX = f"{ALLOWED_PLUGIN_DIR}/"
+MAX_DOWNTIME_DURATION = timedelta(days=90)
 
 
 def validate_command_list(command: list[str]) -> list[str]:
@@ -313,6 +321,7 @@ class ProblemEntry(BaseModel):
     acknowledged_by: str | None = None
     acknowledged_at: str | None = None
     acknowledged_reason: str | None = None
+    in_downtime: bool = False
 
 
 class ProblemsResponse(BaseModel):
@@ -322,6 +331,7 @@ class ProblemsResponse(BaseModel):
 def _problem_entry_from_record(
     record: CheckResultRecord,
     ack: AcknowledgementRecord | None = None,
+    in_downtime: bool = False,
 ) -> ProblemEntry:
     return ProblemEntry(
         check_id=record.check_id,
@@ -334,6 +344,7 @@ def _problem_entry_from_record(
         acknowledged_by=ack.operator if ack else None,
         acknowledged_at=ack.created_at if ack else None,
         acknowledged_reason=ack.reason if ack else None,
+        in_downtime=in_downtime,
     )
 
 
@@ -341,9 +352,14 @@ def list_problems() -> ProblemsResponse:
     check_ids = sorted(get_registered_checks())
     problems = get_problems(check_ids)
     ack_map = get_acknowledgements(check_ids)
+    downtime_map = get_downtime_map(check_ids)
     return ProblemsResponse(
         problems=[
-            _problem_entry_from_record(record, ack=ack_map.get(record.check_id))
+            _problem_entry_from_record(
+                record,
+                ack=ack_map.get(record.check_id),
+                in_downtime=downtime_map.get(record.check_id, False),
+            )
             for record in problems
         ]
     )
@@ -473,4 +489,112 @@ def run_scheduler() -> SchedulerRunResponse:
             )
             for check_id, result in results
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/checks/{check_id}/downtimes
+#       GET /api/v1/checks/{check_id}/downtimes
+# ---------------------------------------------------------------------------
+
+
+class CreateDowntimeRequest(BaseModel):
+    start_time: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="ISO-8601 timestamp with timezone",
+    )
+    end_time: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="ISO-8601 timestamp with timezone",
+    )
+    reason: str = Field(..., min_length=1, max_length=2000)
+    operator: str = Field(..., min_length=1, max_length=128)
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_iso_timestamp(cls, value: str) -> str:
+        try:
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None or dt.utcoffset() is None:
+                raise ValueError("timestamp must be timezone-aware")
+        except ValueError as exc:
+            raise ValueError(
+                f"value must be a valid timezone-aware ISO-8601 timestamp: {exc}"
+            ) from exc
+        return dt.astimezone(timezone.utc).isoformat()
+
+    @field_validator("reason", "operator")
+    @classmethod
+    def validate_non_blank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must contain non-whitespace text")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_window_bounds(self) -> "CreateDowntimeRequest":
+        start = datetime.fromisoformat(self.start_time)
+        end = datetime.fromisoformat(self.end_time)
+        if end <= start:
+            raise ValueError("end_time must be after start_time")
+        if end - start > MAX_DOWNTIME_DURATION:
+            raise ValueError("downtime window must not exceed 90 days")
+        return self
+
+
+class DowntimeEntry(BaseModel):
+    id: int
+    check_id: str
+    start_time: str
+    end_time: str
+    reason: str
+    operator: str
+    created_at: str
+
+
+class CreateDowntimeResponse(BaseModel):
+    downtime: DowntimeEntry
+
+
+class ListDowntimesResponse(BaseModel):
+    downtimes: list[DowntimeEntry]
+
+
+def _downtime_entry_from_record(record: DowntimeRecord) -> DowntimeEntry:
+    return DowntimeEntry(
+        id=record.id,
+        check_id=record.check_id,
+        start_time=record.start_time,
+        end_time=record.end_time,
+        reason=record.reason,
+        operator=record.operator,
+        created_at=record.created_at,
+    )
+
+
+def create_downtime(check_id: str, payload: CreateDowntimeRequest) -> CreateDowntimeResponse:
+    if get_registered_command(check_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown check_id: {check_id}")
+
+    record = persist_downtime(
+        check_id=check_id,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        reason=payload.reason,
+        operator=payload.operator,
+    )
+    return CreateDowntimeResponse(downtime=_downtime_entry_from_record(record))
+
+
+def list_downtimes(check_id: str) -> ListDowntimesResponse:
+    if get_registered_command(check_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown check_id: {check_id}")
+
+    records = get_downtimes(check_id)
+    return ListDowntimesResponse(
+        downtimes=[_downtime_entry_from_record(record) for record in records]
     )

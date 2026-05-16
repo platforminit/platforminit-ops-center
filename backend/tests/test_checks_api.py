@@ -706,6 +706,7 @@ def test_problems_response_fields(
         "acknowledged_by",
         "acknowledged_at",
         "acknowledged_reason",
+        "in_downtime",
     }
     assert problem["check_id"] == "http-example"
     assert problem["status"] == "CRITICAL"
@@ -1033,3 +1034,438 @@ def test_problems_acknowledgement_persists_across_requests(
     assert problem["acknowledged"] is True
     assert problem["acknowledged_by"] == "bob"
     assert problem["acknowledged_reason"] == "Known issue"
+
+
+# ---------------------------------------------------------------------------
+# New: Downtime API tests
+# ---------------------------------------------------------------------------
+
+
+def _iso_future(offset_hours: int = 1) -> str:
+    """Return a timezone-aware ISO timestamp *offset_hours* from now."""
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(hours=offset_hours)).isoformat()
+
+
+def _iso_past(offset_hours: int = -1) -> str:
+    """Return a timezone-aware ISO timestamp *offset_hours* from now."""
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(hours=offset_hours)).isoformat()
+
+
+def test_create_downtime_ok(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    client = TestClient(app)
+    start = _iso_future(1)
+    end = _iso_future(2)
+
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Scheduled maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    downtime = body["downtime"]
+    assert downtime["check_id"] == "http-example"
+    assert downtime["start_time"] == start
+    assert downtime["end_time"] == end
+    assert downtime["reason"] == "Scheduled maintenance"
+    assert downtime["operator"] == "alice"
+    assert downtime["id"] > 0
+    assert downtime["created_at"]
+
+
+def test_create_downtime_unknown_check_id() -> None:
+    client = TestClient(app)
+    start = _iso_future(1)
+    end = _iso_future(2)
+
+    response = client.post(
+        "/api/v1/checks/nonexistent-check/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_create_downtime_start_after_end_rejected() -> None:
+    client = TestClient(app)
+    start = _iso_future(2)
+    end = _iso_future(1)
+
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_start_equal_end_rejected() -> None:
+    client = TestClient(app)
+    ts = _iso_future(1)
+
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": ts,
+            "end_time": ts,
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_naive_timestamp_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": "2026-01-01T00:00:00",
+            "end_time": "2026-01-02T00:00:00",
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_normalizes_offsets_to_utc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": "2026-01-01T10:00:00+02:00",
+            "end_time": "2026-01-01T12:00:00+02:00",
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 200
+    downtime = response.json()["downtime"]
+    assert downtime["start_time"] == "2026-01-01T08:00:00+00:00"
+    assert downtime["end_time"] == "2026-01-01T10:00:00+00:00"
+
+
+def test_create_downtime_too_long_window_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": "2026-01-01T00:00:00+00:00",
+            "end_time": "2026-04-02T00:00:01+00:00",
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_oversized_timestamp_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": "2026-01-01T00:00:00+00:00" + "0" * 100,
+            "end_time": "2026-01-02T00:00:00+00:00",
+            "reason": "Maintenance",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_empty_reason_rejected() -> None:
+    client = TestClient(app)
+    start = _iso_future(1)
+    end = _iso_future(2)
+
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "",
+            "operator": "alice",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_downtime_blank_operator_rejected() -> None:
+    client = TestClient(app)
+    start = _iso_future(1)
+    end = _iso_future(2)
+
+    response = client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Maintenance",
+            "operator": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_list_downtimes_returns_all(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    client = TestClient(app)
+    start1 = _iso_future(1)
+    end1 = _iso_future(2)
+    start2 = _iso_future(3)
+    end2 = _iso_future(4)
+
+    client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start1,
+            "end_time": end1,
+            "reason": "First maintenance",
+            "operator": "alice",
+        },
+    )
+    client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start2,
+            "end_time": end2,
+            "reason": "Second maintenance",
+            "operator": "bob",
+        },
+    )
+
+    response = client.get("/api/v1/checks/http-example/downtimes")
+    assert response.status_code == 200
+    body = response.json()
+    downtimes = body["downtimes"]
+    assert len(downtimes) == 2
+    # Newest first (start_time descending)
+    assert downtimes[0]["start_time"] == start2
+    assert downtimes[1]["start_time"] == start1
+
+
+def test_list_downtimes_unknown_check_id() -> None:
+    client = TestClient(app)
+    response = client.get("/api/v1/checks/nonexistent-check/downtimes")
+    assert response.status_code == 404
+
+
+def test_list_downtimes_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    client = TestClient(app)
+    response = client.get("/api/v1/checks/http-example/downtimes")
+    assert response.status_code == 200
+    assert response.json() == {"downtimes": []}
+
+
+def test_problems_shows_in_downtime_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    # Before downtime
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["in_downtime"] is False
+
+    # Create an active downtime window using a fixed reference time
+    # Use a fixed "now" to avoid timestamp comparison race conditions
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(hours=1)).isoformat()
+    end = (now + timedelta(hours=2)).isoformat()
+
+    client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Planned maintenance",
+            "operator": "alice",
+        },
+    )
+
+    # After downtime
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["in_downtime"] is True
+
+
+def test_problems_in_downtime_false_when_window_expired(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    # Create a downtime window that is already expired (both in past)
+    start = _iso_past(4)
+    end = _iso_past(1)
+    client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": start,
+            "end_time": end,
+            "reason": "Past maintenance",
+            "operator": "alice",
+        },
+    )
+
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["in_downtime"] is False
+
+
+def test_problems_marks_not_hides_problem_during_downtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=3,
+            status=CheckStatus.UNKNOWN,
+            output="HTTP UNKNOWN",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    client.post(
+        "/api/v1/checks/http-example/downtimes",
+        json={
+            "start_time": (now - timedelta(minutes=5)).isoformat(),
+            "end_time": (now + timedelta(minutes=5)).isoformat(),
+            "reason": "Planned maintenance",
+            "operator": "alice",
+        },
+    )
+
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problems = response.json()["problems"]
+    assert len(problems) == 1
+    assert problems[0]["check_id"] == "http-example"
+    assert problems[0]["status"] == "UNKNOWN"
+    assert problems[0]["in_downtime"] is True
+
+
+def test_problems_response_fields_include_in_downtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+
+    assert "in_downtime" in problem
+    assert set(problem.keys()) == {
+        "check_id",
+        "status",
+        "output",
+        "created_at",
+        "duration_seconds",
+        "timed_out",
+        "acknowledged",
+        "acknowledged_by",
+        "acknowledged_at",
+        "acknowledged_reason",
+        "in_downtime",
+    }

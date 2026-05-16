@@ -1,7 +1,11 @@
 from fastapi import FastAPI, Query
 
 from app.api.checks import (
+    AcknowledgeRequest,
+    AcknowledgeResponse,
     CheckHistoryResponse,
+    CommentRequest,
+    CommentResponse,
     LatestResultsResponse,
     ProblemsResponse,
     RunCheckRequest,
@@ -10,6 +14,8 @@ from app.api.checks import (
     RunRegisteredCheckRequest,
     RunRegisteredCheckResponse,
     SchedulerRunResponse,
+    acknowledge_check,
+    add_comment,
     check_history,
     latest_results,
     list_checks,
@@ -66,3 +72,17 @@ def problems_list() -> ProblemsResponse:
 @app.post("/api/v1/scheduler/run", response_model=SchedulerRunResponse)
 def scheduler_run() -> SchedulerRunResponse:
     return run_scheduler()
+
+
+@app.post("/api/v1/checks/{check_id}/acknowledge", response_model=AcknowledgeResponse)
+def checks_acknowledge(
+    check_id: str, payload: AcknowledgeRequest
+) -> AcknowledgeResponse:
+    return acknowledge_check(check_id, payload)
+
+
+@app.post("/api/v1/checks/{check_id}/comments", response_model=CommentResponse)
+def checks_comments(
+    check_id: str, payload: CommentRequest
+) -> CommentResponse:
+    return add_comment(check_id, payload)

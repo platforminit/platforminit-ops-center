@@ -5,9 +5,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
-from app.core.config import load_settings
+from app.store.database import create_connection, initialize_schema
 
 
 # ---------------------------------------------------------------------------
@@ -38,79 +37,6 @@ class ServiceRecord:
     runbook_url: str
     created_at: str
     updated_at: str
-
-
-# ---------------------------------------------------------------------------
-# Database helpers
-# ---------------------------------------------------------------------------
-
-
-def _database_path() -> Path:
-    configured = load_settings().check_results_db
-    if configured is not None:
-        return configured
-
-    return Path(__file__).resolve().parents[2] / "check_results.sqlite3"
-
-
-def _connect() -> sqlite3.Connection:
-    database_path = _database_path()
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(database_path)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def _ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS hosts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            environment TEXT NOT NULL,
-            criticality TEXT NOT NULL,
-            owner TEXT NOT NULL,
-            runbook_url TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_hosts_name
-        ON hosts (name)
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS services (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            host_id INTEGER NOT NULL,
-            environment TEXT NOT NULL,
-            criticality TEXT NOT NULL,
-            owner TEXT NOT NULL,
-            runbook_url TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (host_id) REFERENCES hosts(id)
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_services_name
-        ON services (name)
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_services_host_id
-        ON services (host_id)
-        """
-    )
-    connection.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +180,8 @@ def _seed(connection: sqlite3.Connection) -> None:
 
 def list_hosts() -> list[HostRecord]:
     """Return all hosts ordered by name."""
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         _seed(connection)
         rows = connection.execute(
             "SELECT * FROM hosts ORDER BY name ASC"
@@ -266,8 +192,8 @@ def list_hosts() -> list[HostRecord]:
 
 def list_services() -> list[ServiceRecord]:
     """Return all services ordered by name."""
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         _seed(connection)
         rows = connection.execute(
             "SELECT * FROM services ORDER BY name ASC"

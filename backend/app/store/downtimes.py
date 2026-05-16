@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.store.check_results import _connect, _ensure_schema
+from app.store.database import create_connection, initialize_schema
 
 
 def _utc_iso(value: str) -> str:
@@ -22,29 +22,6 @@ class DowntimeRecord:
     reason: str
     operator: str
     created_at: str
-
-
-def _ensure_downtime_schema(connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS downtimes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_id TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            operator TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_downtimes_check_id
-        ON downtimes (check_id, start_time DESC)
-        """
-    )
-    connection.commit()
 
 
 def _row_to_record(row) -> DowntimeRecord:
@@ -70,9 +47,8 @@ def persist_downtime(
     end_time = _utc_iso(end_time)
     created_at = datetime.now(timezone.utc).isoformat()
 
-    with _connect() as connection:
-        _ensure_schema(connection)
-        _ensure_downtime_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         cursor = connection.execute(
             """
             INSERT INTO downtimes (check_id, start_time, end_time, reason, operator, created_at)
@@ -95,9 +71,8 @@ def persist_downtime(
 
 def get_downtimes(check_id: str) -> list[DowntimeRecord]:
     """Return all downtimes for a check, ordered by start_time descending."""
-    with _connect() as connection:
-        _ensure_schema(connection)
-        _ensure_downtime_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(
             """
             SELECT *
@@ -121,9 +96,8 @@ def is_check_in_downtime(check_id: str, reference_time: str | None = None) -> bo
     else:
         reference_time = _utc_iso(reference_time)
 
-    with _connect() as connection:
-        _ensure_schema(connection)
-        _ensure_downtime_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         row = connection.execute(
             """
             SELECT 1
@@ -161,9 +135,8 @@ def get_downtime_map(
           AND end_time >= ?
     """
 
-    with _connect() as connection:
-        _ensure_schema(connection)
-        _ensure_downtime_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(
             query,
             (*check_ids, reference_time, reference_time),

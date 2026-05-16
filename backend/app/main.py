@@ -30,6 +30,12 @@ from app.api.checks import (
     run_registered_check,
     run_scheduler,
 )
+from app.api.inventory import (
+    ListHostsResponse,
+    ListServicesResponse,
+    list_hosts_handler,
+    list_services_handler,
+)
 from app.store.check_results import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT
 
 app = FastAPI(title="PlatformInit Ops Center API")
@@ -117,3 +123,18 @@ def checks_list_downtimes(
     check_id: str,
 ) -> ListDowntimesResponse:
     return list_downtimes(check_id)
+
+
+# ---------------------------------------------------------------------------
+# Inventory endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/hosts", response_model=ListHostsResponse)
+def hosts_list() -> ListHostsResponse:
+    return list_hosts_handler()
+
+
+@app.get("/api/v1/services", response_model=ListServicesResponse)
+def services_list() -> ListServicesResponse:
+    return list_services_handler()

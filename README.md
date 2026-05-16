@@ -11,6 +11,65 @@ Standalone operations monitoring component for PlatformInit.
 - GitOps-friendly deployment
 - Release artifact deployment to platforminit-dev-01
 
+## MVP API contract
+
+### Endpoint matrix
+
+| Method | Path | Auth required | Purpose |
+|--------|------|---------------|---------|
+| `GET` | `/healthz` | No | Liveness probe |
+| `GET` | `/api/v1/checks` | No | List registered checks (metadata only, no commands) |
+| `GET` | `/api/v1/checks/{check_id}/history` | No | Check result history (newest first, capped by `limit`) |
+| `GET` | `/api/v1/results/latest` | No | Latest result per registered check |
+| `GET` | `/api/v1/problems` | No | Non-OK results sorted by severity then newest |
+| `GET` | `/api/v1/hosts` | No | Seeded host inventory |
+| `GET` | `/api/v1/services` | No | Seeded service inventory |
+| `GET` | `/api/v1/checks/{check_id}/downtimes` | No | List downtimes for a check |
+| `POST` | `/api/v1/checks/run` | Yes | Execute an ad-hoc Nagios plugin command |
+| `POST` | `/api/v1/checks/{check_id}/run` | Yes | Execute a registered check by ID |
+| `POST` | `/api/v1/scheduler/run` | Yes | Run all due registered checks |
+| `POST` | `/api/v1/checks/{check_id}/acknowledge` | Yes | Acknowledge a problem |
+| `POST` | `/api/v1/checks/{check_id}/comments` | Yes | Add a comment to a check |
+| `POST` | `/api/v1/checks/{check_id}/downtimes` | Yes | Schedule a downtime window |
+
+### Public response guarantees
+
+- **`command`** and **`stderr`** are never included in any public API response.
+  The internal `PluginResult` model retains these fields for runner/store
+  internals only.
+- **`CheckResultEntry`** (history, latest results) and **`PublicCheckResult`**
+  (ad-hoc / registered run) both strip internal fields before serialization.
+- **`ProblemEntry`** includes acknowledgement state (`acknowledged`,
+  `acknowledged_by`, `acknowledged_at`, `acknowledged_reason`) and downtime
+  state (`in_downtime`).
+
+### Local development auth flags
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `OPS_CENTER_AUTH_ENABLED` | `false` | When `true`, mutation endpoints require `Authorization: Bearer <token>` |
+| `OPS_CENTER_API_TOKEN` | unset | Expected bearer token value |
+| `OPS_CENTER_ENABLE_ADHOC_CHECKS` | `false` | When `true`, `POST /api/v1/checks/run` is allowed |
+| `PLATFORMINIT_CHECK_RESULTS_DB` | unset | Filesystem path for the SQLite database |
+
+All four variables default to safe local-dev values so the API runs without
+any environment configuration.
+
+### Ad-hoc check execution
+
+Ad-hoc plugin execution (`POST /api/v1/checks/run`) is **disabled by default**
+(`OPS_CENTER_ENABLE_ADHOC_CHECKS=false`). Set to `"true"` to enable.
+Registered check execution (`POST /api/v1/checks/{check_id}/run`) is
+unaffected by this flag.
+
+When enabled, ad-hoc commands are validated against a strict allow-list:
+- The executable must reside under `/usr/lib/nagios/plugins/`.
+- Path traversal (`..`) is rejected.
+- Each argument is capped at 512 characters.
+- The command list is capped at 20 elements.
+- Shell strings are rejected (must be a JSON array of strings).
+- Timeout is capped at 30 seconds.
+
 ## Local development
 
 ```bash

@@ -91,6 +91,13 @@ api:
     periodSeconds: 10
 
   # Environment variables (non-sensitive)
+  #
+  # SECURITY: Production deployments MUST set OPS_CENTER_AUTH_ENABLED=true
+  # and OPS_CENTER_API_TOKEN to a strong, randomly generated value.
+  # Without these, mutation endpoints (check run, acknowledge, comment,
+  # downtime) are unprotected.  The local-dev default (auth disabled)
+  # is intentional for development convenience but MUST NOT be used in
+  # any exposed or production-like environment.
   env:
     - name: PYTHONUNBUFFERED
       value: "1"

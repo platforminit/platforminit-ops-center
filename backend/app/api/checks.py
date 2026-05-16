@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.runner.nagios import run_nagios_plugin
 from app.runner.models import PluginResult
+from app.store.check_results import (
+    DEFAULT_HISTORY_LIMIT,
+    CheckResultRecord,
+    get_check_history,
+    get_latest_results,
+    get_problems,
+    persist_check_result,
+)
 
 ALLOWED_PLUGIN_DIR = PurePosixPath("/usr/lib/nagios/plugins")
 ALLOWED_PREFIX = f"{ALLOWED_PLUGIN_DIR}/"
@@ -145,4 +153,106 @@ def run_registered_check(check_id: str, payload: RunRegisteredCheckRequest) -> R
         command=command,
         timeout_seconds=payload.timeout_seconds,
     )
+    persist_check_result(check_id, result)
     return RunRegisteredCheckResponse(check_id=check_id, result=result)
+
+
+# ---------------------------------------------------------------------------
+# New: persisted check result read APIs
+# ---------------------------------------------------------------------------
+
+
+class CheckResultEntry(BaseModel):
+    id: int
+    check_id: str
+    status: str
+    output: str
+    perfdata: str | None
+    stderr: str | None
+    exit_code: int
+    duration_seconds: float
+    timed_out: bool
+    created_at: str
+
+
+class CheckHistoryResponse(BaseModel):
+    check_id: str
+    results: list[CheckResultEntry]
+
+
+class LatestResultsResponse(BaseModel):
+    results: list[CheckResultEntry]
+
+
+def _entry_from_record(record: CheckResultRecord) -> CheckResultEntry:
+    return CheckResultEntry(
+        id=record.id,
+        check_id=record.check_id,
+        status=record.status,
+        output=record.output,
+        perfdata=record.perfdata,
+        stderr=record.stderr,
+        exit_code=record.exit_code,
+        duration_seconds=record.duration_seconds,
+        timed_out=record.timed_out,
+        created_at=record.created_at,
+    )
+
+
+def check_history(
+    check_id: str,
+    limit: int = DEFAULT_HISTORY_LIMIT,
+) -> CheckHistoryResponse:
+    if get_registered_command(check_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown check_id: {check_id}")
+
+    return CheckHistoryResponse(
+        check_id=check_id,
+        results=[_entry_from_record(record) for record in get_check_history(check_id, limit=limit)],
+    )
+
+
+def latest_results() -> LatestResultsResponse:
+    check_ids = sorted(get_registered_checks())
+    return LatestResultsResponse(
+        results=[_entry_from_record(record) for record in get_latest_results(check_ids)]
+    )
+
+
+# ---------------------------------------------------------------------------
+# New: GET /api/v1/problems
+# ---------------------------------------------------------------------------
+
+
+class ProblemEntry(BaseModel):
+    check_id: str
+    status: str
+    output: str
+    created_at: str
+    duration_seconds: float
+    timed_out: bool
+
+
+class ProblemsResponse(BaseModel):
+    problems: list[ProblemEntry]
+
+
+def _problem_entry_from_record(record: CheckResultRecord) -> ProblemEntry:
+    return ProblemEntry(
+        check_id=record.check_id,
+        status=record.status,
+        output=record.output,
+        created_at=record.created_at,
+        duration_seconds=record.duration_seconds,
+        timed_out=record.timed_out,
+    )
+
+
+def list_problems() -> ProblemsResponse:
+    check_ids = sorted(get_registered_checks())
+    return ProblemsResponse(
+        problems=[
+            _problem_entry_from_record(record)
+            for record in get_problems(check_ids)
+        ]
+    )

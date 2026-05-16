@@ -1,0 +1,23 @@
+# =============================================================================
+# frontend/.containerignore — Frontend build-context exclusions
+# =============================================================================
+*
+!package.json
+!pnpm-lock.yaml
+!tsconfig.json
+!tsconfig.app.json
+!tsconfig.node.json
+!vite.config.ts
+!eslint.config.js
+!index.html
+!public/
+!src/
+
+# Development artifacts
+node_modules
+dist
+build
+.vite
+*.log
+.env
+.env.*

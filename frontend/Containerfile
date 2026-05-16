@@ -1,0 +1,30 @@
+# =============================================================================
+# frontend/Containerfile — PlatformInit Ops Center UI
+#
+# Build stage:  production Vite build with pnpm
+# Runtime:      unprivileged nginx serving static assets on port 8080
+# =============================================================================
+FROM docker.io/node:22-alpine AS builder
+
+WORKDIR /build
+
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+
+COPY tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts eslint.config.js ./
+COPY public/ ./public/
+COPY src/ ./src/
+COPY index.html ./
+
+RUN corepack enable && pnpm build
+
+# ---------------------------------------------------------------------------
+# Runtime image
+# ---------------------------------------------------------------------------
+FROM docker.io/nginxinc/nginx-unprivileged:1.27-alpine
+
+COPY --from=builder --chown=101:0 /build/dist/ /usr/share/nginx/html/
+
+EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]

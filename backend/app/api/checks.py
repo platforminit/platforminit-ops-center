@@ -13,11 +13,15 @@ from app.runner.models import PluginResult
 from app.scheduler.service import run_due_checks
 from app.store.check_results import (
     DEFAULT_HISTORY_LIMIT,
+    AcknowledgementRecord,
     CheckResultRecord,
+    get_acknowledgements,
     get_check_history,
     get_latest_results,
     get_problems,
+    persist_acknowledgement,
     persist_check_result,
+    persist_comment,
 )
 
 ALLOWED_PLUGIN_DIR = PurePosixPath("/usr/lib/nagios/plugins")
@@ -305,13 +309,20 @@ class ProblemEntry(BaseModel):
     created_at: str
     duration_seconds: float
     timed_out: bool
+    acknowledged: bool
+    acknowledged_by: str | None = None
+    acknowledged_at: str | None = None
+    acknowledged_reason: str | None = None
 
 
 class ProblemsResponse(BaseModel):
     problems: list[ProblemEntry]
 
 
-def _problem_entry_from_record(record: CheckResultRecord) -> ProblemEntry:
+def _problem_entry_from_record(
+    record: CheckResultRecord,
+    ack: AcknowledgementRecord | None = None,
+) -> ProblemEntry:
     return ProblemEntry(
         check_id=record.check_id,
         status=record.status,
@@ -319,16 +330,117 @@ def _problem_entry_from_record(record: CheckResultRecord) -> ProblemEntry:
         created_at=record.created_at,
         duration_seconds=record.duration_seconds,
         timed_out=record.timed_out,
+        acknowledged=ack is not None,
+        acknowledged_by=ack.operator if ack else None,
+        acknowledged_at=ack.created_at if ack else None,
+        acknowledged_reason=ack.reason if ack else None,
     )
 
 
 def list_problems() -> ProblemsResponse:
     check_ids = sorted(get_registered_checks())
+    problems = get_problems(check_ids)
+    ack_map = get_acknowledgements(check_ids)
     return ProblemsResponse(
         problems=[
-            _problem_entry_from_record(record)
-            for record in get_problems(check_ids)
+            _problem_entry_from_record(record, ack=ack_map.get(record.check_id))
+            for record in problems
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/checks/{check_id}/acknowledge
+# ---------------------------------------------------------------------------
+
+
+class AcknowledgeRequest(BaseModel):
+    operator: str = Field(..., min_length=1, max_length=128)
+    reason: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("operator", "reason")
+    @classmethod
+    def validate_non_blank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must contain non-whitespace text")
+        return normalized
+
+
+class AcknowledgeResponse(BaseModel):
+    id: int
+    check_id: str
+    operator: str
+    reason: str
+    created_at: str
+
+
+def acknowledge_check(check_id: str, payload: AcknowledgeRequest) -> AcknowledgeResponse:
+    if get_registered_command(check_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown check_id: {check_id}")
+
+    current_problems = get_problems([check_id])
+    if not current_problems:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot acknowledge a check without a current problem",
+        )
+
+    record = persist_acknowledgement(
+        check_id=check_id,
+        operator=payload.operator,
+        reason=payload.reason,
+    )
+    return AcknowledgeResponse(
+        id=record.id,
+        check_id=record.check_id,
+        operator=record.operator,
+        reason=record.reason,
+        created_at=record.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/checks/{check_id}/comments
+# ---------------------------------------------------------------------------
+
+
+class CommentRequest(BaseModel):
+    operator: str = Field(..., min_length=1, max_length=128)
+    comment: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("operator", "comment")
+    @classmethod
+    def validate_non_blank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must contain non-whitespace text")
+        return normalized
+
+
+class CommentResponse(BaseModel):
+    id: int
+    check_id: str
+    operator: str
+    comment: str
+    created_at: str
+
+
+def add_comment(check_id: str, payload: CommentRequest) -> CommentResponse:
+    if get_registered_command(check_id) is None:
+        raise HTTPException(status_code=404, detail=f"Unknown check_id: {check_id}")
+
+    record = persist_comment(
+        check_id=check_id,
+        operator=payload.operator,
+        comment=payload.comment,
+    )
+    return CommentResponse(
+        id=record.id,
+        check_id=record.check_id,
+        operator=record.operator,
+        comment=record.comment,
+        created_at=record.created_at,
     )
 
 

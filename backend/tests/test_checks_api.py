@@ -702,9 +702,334 @@ def test_problems_response_fields(
         "created_at",
         "duration_seconds",
         "timed_out",
+        "acknowledged",
+        "acknowledged_by",
+        "acknowledged_at",
+        "acknowledged_reason",
     }
     assert problem["check_id"] == "http-example"
     assert problem["status"] == "CRITICAL"
     assert problem["output"] == "HTTP CRITICAL: connection refused"
     assert problem["duration_seconds"] == 2.5
     assert problem["timed_out"] is False
+    assert problem["acknowledged"] is False
+    assert problem["acknowledged_by"] is None
+    assert problem["acknowledged_at"] is None
+    assert problem["acknowledged_reason"] is None
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/checks/{check_id}/acknowledge tests
+# ---------------------------------------------------------------------------
+
+
+def test_acknowledge_ok(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    # First run a check to create a result
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": "Investigating"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["check_id"] == "http-example"
+    assert body["operator"] == "alice"
+    assert body["reason"] == "Investigating"
+    assert body["id"] > 0
+    assert body["created_at"]
+
+
+def test_acknowledge_unknown_check_id() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/nonexistent-check/acknowledge",
+        json={"operator": "alice", "reason": "Investigating"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_acknowledge_empty_operator_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "", "reason": "Investigating"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_blank_operator_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "   ", "reason": "Investigating"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_operator_too_long_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "a" * 129, "reason": "Investigating"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_empty_reason_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": ""},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_blank_reason_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": "   "},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_reason_too_long_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": "a" * 2001},
+    )
+
+    assert response.status_code == 422
+
+
+def test_acknowledge_requires_current_problem(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": "Investigating"},
+    )
+
+    assert response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/checks/{check_id}/comments tests
+# ---------------------------------------------------------------------------
+
+
+def test_comment_ok(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "bob", "comment": "This looks like a network issue"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["check_id"] == "http-example"
+    assert body["operator"] == "bob"
+    assert body["comment"] == "This looks like a network issue"
+    assert body["id"] > 0
+    assert body["created_at"]
+
+
+def test_comment_unknown_check_id() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/nonexistent-check/comments",
+        json={"operator": "bob", "comment": "test comment"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_comment_empty_operator_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "", "comment": "test comment"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_comment_blank_operator_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "   ", "comment": "test comment"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_comment_operator_too_long_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "a" * 129, "comment": "test comment"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_comment_empty_comment_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "bob", "comment": ""},
+    )
+
+    assert response.status_code == 422
+
+
+def test_comment_blank_comment_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "bob", "comment": "   "},
+    )
+
+    assert response.status_code == 422
+
+
+def test_comment_comment_too_long_rejected() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/comments",
+        json={"operator": "bob", "comment": "a" * 2001},
+    )
+
+    assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# New: Problems response with acknowledgement state tests
+# ---------------------------------------------------------------------------
+
+
+def test_problems_shows_acknowledgement_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    # Before acknowledge
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["acknowledged"] is False
+    assert problem["acknowledged_by"] is None
+    assert problem["acknowledged_at"] is None
+    assert problem["acknowledged_reason"] is None
+
+    # Acknowledge
+    client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "alice", "reason": "Looking into it"},
+    )
+
+    # After acknowledge
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["acknowledged"] is True
+    assert problem["acknowledged_by"] == "alice"
+    assert problem["acknowledged_reason"] == "Looking into it"
+    assert problem["acknowledged_at"] is not None
+
+
+def test_problems_acknowledgement_persists_across_requests(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    # Acknowledge
+    client.post(
+        "/api/v1/checks/http-example/acknowledge",
+        json={"operator": "bob", "reason": "Known issue"},
+    )
+
+    # Verify acknowledgement persists
+    response = client.get("/api/v1/problems")
+    assert response.status_code == 200
+    problem = response.json()["problems"][0]
+    assert problem["acknowledged"] is True
+    assert problem["acknowledged_by"] == "bob"
+    assert problem["acknowledged_reason"] == "Known issue"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
@@ -10,6 +9,7 @@ from typing import Mapping
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.config import load_settings
 from app.runner.nagios import run_nagios_plugin
 from app.runner.models import PluginResult
 from app.scheduler.service import run_due_checks
@@ -72,8 +72,7 @@ def _is_adhoc_enabled() -> bool:
     Controlled by ``OPS_CENTER_ENABLE_ADHOC_CHECKS``.
     Defaults to ``"false"`` for safety.
     """
-    raw = os.environ.get("OPS_CENTER_ENABLE_ADHOC_CHECKS", "false").strip().lower()
-    return raw in ("1", "true", "yes")
+    return load_settings().enable_adhoc_checks
 
 
 # ---------------------------------------------------------------------------

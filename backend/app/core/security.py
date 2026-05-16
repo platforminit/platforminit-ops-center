@@ -6,24 +6,9 @@ When enabled, requires ``Authorization: Bearer <token>`` on sensitive endpoints.
 
 from __future__ import annotations
 
-import os
-
 from fastapi import HTTPException, Request, status
 
-
-def _is_auth_enabled() -> bool:
-    """Return ``True`` if API authentication is enabled.
-
-    Controlled by the ``OPS_CENTER_AUTH_ENABLED`` environment variable.
-    Defaults to ``"false"`` for local development.
-    """
-    raw = os.environ.get("OPS_CENTER_AUTH_ENABLED", "false").strip().lower()
-    return raw in ("1", "true", "yes")
-
-
-def _expected_token() -> str | None:
-    """Return the expected API token, or ``None`` if not configured."""
-    return os.environ.get("OPS_CENTER_API_TOKEN") or None
+from app.core.config import load_settings
 
 
 async def require_auth(request: Request) -> None:
@@ -36,10 +21,12 @@ async def require_auth(request: Request) -> None:
     <token>`` header whose value matches ``OPS_CENTER_API_TOKEN``.
     Missing or invalid tokens result in a 401 response.
     """
-    if not _is_auth_enabled():
+    settings = load_settings()
+
+    if not settings.auth_enabled:
         return
 
-    token = _expected_token()
+    token = settings.api_token
     if token is None:
         # Auth is enabled but no token is configured — fail closed.
         raise HTTPException(

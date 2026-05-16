@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.core.config import load_settings
 from app.runner.models import PluginResult
 
 
@@ -46,9 +46,9 @@ class CommentRecord:
 
 
 def _database_path() -> Path:
-    configured_path = os.environ.get("PLATFORMINIT_CHECK_RESULTS_DB")
-    if configured_path:
-        return Path(configured_path)
+    configured = load_settings().check_results_db
+    if configured is not None:
+        return configured
 
     return Path(__file__).resolve().parents[2] / "check_results.sqlite3"
 

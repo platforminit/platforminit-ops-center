@@ -1,0 +1,32 @@
+chore(helm): add ops center chart skeleton
+
+Introduce a first Helm chart skeleton for deploying PlatformInit Ops Center
+to the platforminit-dev-01 Kubernetes cluster. The chart follows standard
+Helm best practices and is designed for GitOps-friendly deployment.
+
+Changes:
+- Add Chart.yaml with apiVersion v2, appVersion 0.1.0, kubeVersion >=1.28.0
+- Add values.yaml with comprehensive defaults for api and ui components,
+  including image repository/tag, resource requests/limits, probes, security
+  contexts, and service accounts
+- Add _helpers.tpl with reusable name/label/selector templates and ingress
+  API version detection
+- Add namespace.yaml template (conditional on namespaceOverride)
+- Add api-deployment.yaml and api-service.yaml templates for the backend
+  API component (port 8000)
+- Add ui-deployment.yaml and ui-service.yaml templates for the frontend
+  UI component (port 8080)
+- Add api-serviceaccount.yaml and ui-serviceaccount.yaml templates for
+  per-component service accounts
+- Add ingress.yaml template (disabled by default) with support for both
+  networking.k8s.io/v1 and v1beta1 API versions
+- Add deploy/dev/values.yaml with placeholder image refs and dev-specific
+  resource overrides for platforminit-dev-01
+- Add deploy/dev/kustomization.yaml for Kustomize-based Helm chart usage
+- Update README.md with helm lint, template rendering, and dry-run deploy
+  instructions
+
+All image references use placeholder tags (ghcr.io/platforminit/ops-center-*).
+No real secrets are included — external secret management is expected for
+production use. Ingress is disabled by default; enable via values when a
+domain and TLS certificate are available.

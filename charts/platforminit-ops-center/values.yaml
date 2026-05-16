@@ -97,9 +97,14 @@ api:
     - name: OPS_CENTER_DB_PATH
       value: /data/ops-center.db
 
-  # Volume mounts for persistent data (e.g. SQLite database)
-  extraVolumeMounts: []
-  extraVolumes: []
+  # Writable scratch storage for development/runtime state.
+  # Replace with a PersistentVolumeClaim when persistence requirements are defined.
+  extraVolumeMounts:
+    - name: api-data
+      mountPath: /data
+  extraVolumes:
+    - name: api-data
+      emptyDir: {}
 
   # Annotations and labels
   podAnnotations: {}
@@ -177,8 +182,22 @@ ui:
   # Environment variables (non-sensitive)
   env: []
 
-  extraVolumeMounts: []
-  extraVolumes: []
+  # nginx-unprivileged requires writable runtime/cache directories when the
+  # container root filesystem is read-only.
+  extraVolumeMounts:
+    - name: ui-cache
+      mountPath: /var/cache/nginx
+    - name: ui-run
+      mountPath: /var/run
+    - name: ui-tmp
+      mountPath: /tmp
+  extraVolumes:
+    - name: ui-cache
+      emptyDir: {}
+    - name: ui-run
+      emptyDir: {}
+    - name: ui-tmp
+      emptyDir: {}
 
   podAnnotations: {}
   podLabels: {}

@@ -3,10 +3,9 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
-from app.core.config import load_settings
 from app.runner.models import PluginResult
+from app.store.database import create_connection, initialize_schema
 
 
 DEFAULT_HISTORY_LIMIT = 25
@@ -45,82 +44,6 @@ class CommentRecord:
     created_at: str
 
 
-def _database_path() -> Path:
-    configured = load_settings().check_results_db
-    if configured is not None:
-        return configured
-
-    return Path(__file__).resolve().parents[2] / "check_results.sqlite3"
-
-
-def _connect() -> sqlite3.Connection:
-    database_path = _database_path()
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(database_path)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def _ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS check_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_id TEXT NOT NULL,
-            status TEXT NOT NULL,
-            output TEXT NOT NULL,
-            perfdata TEXT,
-            stderr TEXT,
-            exit_code INTEGER NOT NULL,
-            duration_seconds REAL NOT NULL,
-            timed_out INTEGER NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_check_results_check_id_created_at
-        ON check_results (check_id, created_at DESC, id DESC)
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS acknowledgements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_id TEXT NOT NULL,
-            operator TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_acknowledgements_check_id
-        ON acknowledgements (check_id, created_at DESC)
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_id TEXT NOT NULL,
-            operator TEXT NOT NULL,
-            comment TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_comments_check_id
-        ON comments (check_id, created_at DESC)
-        """
-    )
-    connection.commit()
-
-
 def _row_to_record(row: sqlite3.Row) -> CheckResultRecord:
     return CheckResultRecord(
         id=int(row["id"]),
@@ -139,8 +62,8 @@ def _row_to_record(row: sqlite3.Row) -> CheckResultRecord:
 def persist_check_result(check_id: str, result: PluginResult) -> CheckResultRecord:
     created_at = datetime.now(timezone.utc).isoformat()
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         cursor = connection.execute(
             """
             INSERT INTO check_results (
@@ -184,8 +107,8 @@ def persist_check_result(check_id: str, result: PluginResult) -> CheckResultReco
 def get_check_history(check_id: str, limit: int = DEFAULT_HISTORY_LIMIT) -> list[CheckResultRecord]:
     normalized_limit = min(max(limit, 1), MAX_HISTORY_LIMIT)
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(
             """
             SELECT *
@@ -219,8 +142,8 @@ def get_latest_results(check_ids: list[str]) -> list[CheckResultRecord]:
         ORDER BY cr.check_id ASC
     """
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(query, tuple(check_ids)).fetchall()
 
     return [_row_to_record(row) for row in rows]
@@ -251,8 +174,8 @@ def get_problems(check_ids: list[str]) -> list[CheckResultRecord]:
         WHERE cr.status IN ('WARNING', 'CRITICAL', 'UNKNOWN')
     """
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(query, tuple(check_ids)).fetchall()
 
     records = [_row_to_record(row) for row in rows]
@@ -287,8 +210,8 @@ def persist_acknowledgement(
 ) -> AcknowledgementRecord:
     created_at = datetime.now(timezone.utc).isoformat()
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         cursor = connection.execute(
             """
             INSERT INTO acknowledgements (check_id, operator, reason, created_at)
@@ -328,8 +251,8 @@ def get_acknowledgements(check_ids: list[str]) -> dict[str, AcknowledgementRecor
             AND a.id = latest.id
     """
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(query, tuple(check_ids)).fetchall()
 
     return {row["check_id"]: _ack_row_to_record(row) for row in rows}
@@ -357,8 +280,8 @@ def persist_comment(
 ) -> CommentRecord:
     created_at = datetime.now(timezone.utc).isoformat()
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         cursor = connection.execute(
             """
             INSERT INTO comments (check_id, operator, comment, created_at)
@@ -383,8 +306,8 @@ def get_comments(check_id: str, limit: int = DEFAULT_HISTORY_LIMIT) -> list[Comm
     """Return comments for a check, newest first."""
     normalized_limit = min(max(limit, 1), MAX_HISTORY_LIMIT)
 
-    with _connect() as connection:
-        _ensure_schema(connection)
+    with create_connection() as connection:
+        initialize_schema(connection)
         rows = connection.execute(
             """
             SELECT *
@@ -397,4 +320,3 @@ def get_comments(check_id: str, limit: int = DEFAULT_HISTORY_LIMIT) -> list[Comm
         ).fetchall()
 
     return [_comment_row_to_record(row) for row in rows]
-

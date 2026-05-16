@@ -1,0 +1,10 @@
+{{- if .Values.namespaceOverride }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaceOverride }}
+  labels:
+    {{- include "platforminit-ops-center.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+{{- end }}

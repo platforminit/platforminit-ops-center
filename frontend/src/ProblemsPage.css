@@ -1,0 +1,186 @@
+.problems-page {
+  padding: 24px;
+  text-align: left;
+}
+
+.problems-page h1 {
+  margin: 0 0 24px;
+  font-size: 28px;
+}
+
+/* Loading state */
+.loading-state {
+  text-align: center;
+  color: var(--text);
+  padding: 48px 0;
+}
+
+/* Error state */
+.error-state {
+  text-align: center;
+  padding: 48px 0;
+  color: #b91c1c;
+}
+
+.error-state .error-detail {
+  font-family: var(--mono);
+  font-size: 14px;
+  margin: 8px 0 16px;
+  color: var(--text);
+}
+
+.error-state button {
+  font-size: 14px;
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.error-state button:hover {
+  background: var(--code-bg);
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  color: var(--text);
+  padding: 48px 0;
+}
+
+/* Table */
+.problems-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.problems-table th,
+.problems-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.problems-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.problems-table tbody tr:hover {
+  background: var(--code-bg);
+}
+
+/* Status badge */
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-critical {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.status-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-unknown {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-ok {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-critical {
+    background: #450a0a;
+    color: #fca5a5;
+  }
+
+  .status-warning {
+    background: #451a03;
+    color: #fcd34d;
+  }
+
+  .status-unknown {
+    background: #1f2937;
+    color: #9ca3af;
+  }
+
+  .status-ok {
+    background: #052e16;
+    color: #86efac;
+  }
+}
+
+/* Cell styles */
+.cell-check-id {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.cell-output {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.cell-time {
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* Ack badge */
+.ack-badge,
+.downtime-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ack-yes,
+.downtime-yes {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.ack-no,
+.downtime-no {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ack-yes,
+  .downtime-yes {
+    background: #052e16;
+    color: #86efac;
+  }
+
+  .ack-no,
+  .downtime-no {
+    background: #1f2937;
+    color: #9ca3af;
+  }
+}

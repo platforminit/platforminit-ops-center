@@ -94,7 +94,9 @@ api:
   env:
     - name: PYTHONUNBUFFERED
       value: "1"
-    - name: OPS_CENTER_DB_PATH
+    # Standardized database path env var — the backend reads
+    # PLATFORMINIT_CHECK_RESULTS_DB (not OPS_CENTER_DB_PATH).
+    - name: PLATFORMINIT_CHECK_RESULTS_DB
       value: /data/ops-center.db
 
   # Writable scratch storage for development/runtime state.

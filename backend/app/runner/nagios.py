@@ -5,12 +5,20 @@ import time
 
 from app.runner.models import CheckStatus, PluginResult
 
-
 EXIT_CODE_STATUS_MAP = {
     0: CheckStatus.OK,
     1: CheckStatus.WARNING,
     2: CheckStatus.CRITICAL,
     3: CheckStatus.UNKNOWN,
+}
+
+# Maximum number of characters to capture from stdout and stderr.
+_MAX_CAPTURE_CHARS = 8192
+
+# Minimal safe environment for plugin execution.
+_SAFE_ENV: dict[str, str] = {
+    "PATH": "/usr/lib/nagios/plugins:/usr/bin:/bin",
+    "LC_ALL": "C.UTF-8",
 }
 
 
@@ -38,10 +46,17 @@ def run_nagios_plugin(command: list[str], timeout_seconds: int = 10) -> PluginRe
             text=True,
             timeout=timeout_seconds,
             check=False,
+            env=_SAFE_ENV,
+            cwd="/",
         )
 
         duration = time.monotonic() - start
-        output, perfdata = split_output_and_perfdata(completed.stdout)
+
+        # Cap captured output to prevent unbounded memory usage.
+        capped_stdout = completed.stdout[:_MAX_CAPTURE_CHARS] if completed.stdout else ""
+        capped_stderr = completed.stderr[:_MAX_CAPTURE_CHARS] if completed.stderr else ""
+
+        output, perfdata = split_output_and_perfdata(capped_stdout)
 
         return PluginResult(
             command=command,
@@ -49,7 +64,7 @@ def run_nagios_plugin(command: list[str], timeout_seconds: int = 10) -> PluginRe
             status=map_exit_code(completed.returncode),
             output=output,
             perfdata=perfdata,
-            stderr=completed.stderr.strip() or None,
+            stderr=capped_stderr.strip() or None,
             duration_seconds=duration,
             timed_out=False,
         )
@@ -58,7 +73,12 @@ def run_nagios_plugin(command: list[str], timeout_seconds: int = 10) -> PluginRe
         duration = time.monotonic() - start
         stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        output, perfdata = split_output_and_perfdata(stdout)
+
+        # Cap captured output.
+        capped_stdout = stdout[:_MAX_CAPTURE_CHARS]
+        capped_stderr = stderr[:_MAX_CAPTURE_CHARS]
+
+        output, perfdata = split_output_and_perfdata(capped_stdout)
 
         return PluginResult(
             command=command,
@@ -66,7 +86,7 @@ def run_nagios_plugin(command: list[str], timeout_seconds: int = 10) -> PluginRe
             status=CheckStatus.UNKNOWN,
             output=output or f"Plugin timed out after {timeout_seconds}s",
             perfdata=perfdata,
-            stderr=stderr.strip() or None,
+            stderr=capped_stderr.strip() or None,
             duration_seconds=duration,
             timed_out=True,
         )

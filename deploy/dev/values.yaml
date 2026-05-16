@@ -8,10 +8,11 @@
 namespaceOverride: platforminit-ops-center-dev
 
 # Use placeholder image refs — real images are built and pushed separately.
+# Production deployments MUST use immutable version tags or digests.
 api:
   image:
     repository: ghcr.io/platforminit/ops-center-api
-    tag: "latest"
+    tag: "0.1.0-dev"
 
   replicas: 1
 
@@ -26,7 +27,7 @@ api:
 ui:
   image:
     repository: ghcr.io/platforminit/ops-center-ui
-    tag: "latest"
+    tag: "0.1.0-dev"
 
   replicas: 1
 

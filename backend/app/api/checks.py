@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
@@ -58,6 +59,53 @@ def validate_command_list(command: list[str]) -> list[str]:
         raise ValueError(f"command[0] must be an absolute path under {ALLOWED_PREFIX}")
 
     return command
+
+
+# ---------------------------------------------------------------------------
+# Ad-hoc check gating
+# ---------------------------------------------------------------------------
+
+
+def _is_adhoc_enabled() -> bool:
+    """Return ``True`` if ad-hoc check execution is allowed.
+
+    Controlled by ``OPS_CENTER_ENABLE_ADHOC_CHECKS``.
+    Defaults to ``"false"`` for safety.
+    """
+    raw = os.environ.get("OPS_CENTER_ENABLE_ADHOC_CHECKS", "false").strip().lower()
+    return raw in ("1", "true", "yes")
+
+
+# ---------------------------------------------------------------------------
+# Public response model — does NOT expose command or stderr
+# ---------------------------------------------------------------------------
+
+
+class PublicCheckResult(BaseModel):
+    """Public API response model for check results.
+
+    Intentionally omits ``command`` and ``stderr`` to avoid leaking
+    internal execution details.
+    """
+
+    exit_code: int
+    status: str
+    output: str
+    perfdata: str | None = None
+    duration_seconds: float
+    timed_out: bool = False
+
+
+def _to_public(result: PluginResult) -> PublicCheckResult:
+    return PublicCheckResult(
+        exit_code=result.exit_code,
+        status=result.status.value,
+        output=result.output,
+        perfdata=result.perfdata,
+        duration_seconds=result.duration_seconds,
+        timed_out=result.timed_out,
+    )
+
 
 # ---------------------------------------------------------------------------
 # In-memory check registry — metadata-rich definitions
@@ -149,7 +197,7 @@ def get_registered_command(check_id: str) -> list[str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Existing /api/v1/checks/run  (unchanged)
+# Existing /api/v1/checks/run  (with ad-hoc gating)
 # ---------------------------------------------------------------------------
 
 
@@ -164,15 +212,22 @@ class RunCheckRequest(BaseModel):
 
 
 class RunCheckResponse(BaseModel):
-    result: PluginResult
+    result: PublicCheckResult
 
 
 def run_check(payload: RunCheckRequest) -> RunCheckResponse:
+    if not _is_adhoc_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Ad-hoc check execution is disabled. "
+            "Set OPS_CENTER_ENABLE_ADHOC_CHECKS=true to enable.",
+        )
+
     result = run_nagios_plugin(
         command=payload.command,
         timeout_seconds=payload.timeout_seconds,
     )
-    return RunCheckResponse(result=result)
+    return RunCheckResponse(result=_to_public(result))
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +280,7 @@ class RunRegisteredCheckRequest(BaseModel):
 
 class RunRegisteredCheckResponse(BaseModel):
     check_id: str
-    result: PluginResult
+    result: PublicCheckResult
 
 
 def run_registered_check(check_id: str, payload: RunRegisteredCheckRequest) -> RunRegisteredCheckResponse:
@@ -240,7 +295,7 @@ def run_registered_check(check_id: str, payload: RunRegisteredCheckRequest) -> R
         timeout_seconds=payload.timeout_seconds,
     )
     persist_check_result(check_id, result)
-    return RunRegisteredCheckResponse(check_id=check_id, result=result)
+    return RunRegisteredCheckResponse(check_id=check_id, result=_to_public(result))
 
 
 # ---------------------------------------------------------------------------

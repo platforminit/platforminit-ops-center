@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.checks import (
@@ -36,10 +36,14 @@ from app.api.inventory import (
     list_hosts_handler,
     list_services_handler,
 )
+from app.core.security import require_auth
 from app.store.check_results import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT
 
 app = FastAPI(title="PlatformInit Ops Center API")
 
+# ---------------------------------------------------------------------------
+# CORS — restrict origins in production
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -52,26 +56,19 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------------------------
+# Health / read-only endpoints — no auth required (MVP)
+# ---------------------------------------------------------------------------
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/v1/checks/run")
-def checks_run(payload: RunCheckRequest) -> RunCheckResponse:
-    return run_check(payload)
-
-
 @app.get("/api/v1/checks", response_model=ListChecksResponse)
 def checks_list() -> ListChecksResponse:
     return list_checks()
-
-
-@app.post("/api/v1/checks/{check_id}/run", response_model=RunRegisteredCheckResponse)
-def checks_run_registered(
-    check_id: str, payload: RunRegisteredCheckRequest
-) -> RunRegisteredCheckResponse:
-    return run_registered_check(check_id, payload)
 
 
 @app.get("/api/v1/checks/{check_id}/history", response_model=CheckHistoryResponse)
@@ -92,30 +89,14 @@ def problems_list() -> ProblemsResponse:
     return list_problems()
 
 
-@app.post("/api/v1/scheduler/run", response_model=SchedulerRunResponse)
-def scheduler_run() -> SchedulerRunResponse:
-    return run_scheduler()
+@app.get("/api/v1/hosts", response_model=ListHostsResponse)
+def hosts_list() -> ListHostsResponse:
+    return list_hosts_handler()
 
 
-@app.post("/api/v1/checks/{check_id}/acknowledge", response_model=AcknowledgeResponse)
-def checks_acknowledge(
-    check_id: str, payload: AcknowledgeRequest
-) -> AcknowledgeResponse:
-    return acknowledge_check(check_id, payload)
-
-
-@app.post("/api/v1/checks/{check_id}/comments", response_model=CommentResponse)
-def checks_comments(
-    check_id: str, payload: CommentRequest
-) -> CommentResponse:
-    return add_comment(check_id, payload)
-
-
-@app.post("/api/v1/checks/{check_id}/downtimes", response_model=CreateDowntimeResponse)
-def checks_create_downtime(
-    check_id: str, payload: CreateDowntimeRequest
-) -> CreateDowntimeResponse:
-    return create_downtime(check_id, payload)
+@app.get("/api/v1/services", response_model=ListServicesResponse)
+def services_list() -> ListServicesResponse:
+    return list_services_handler()
 
 
 @app.get("/api/v1/checks/{check_id}/downtimes", response_model=ListDowntimesResponse)
@@ -126,15 +107,43 @@ def checks_list_downtimes(
 
 
 # ---------------------------------------------------------------------------
-# Inventory endpoints
+# Mutation endpoints — auth required (when OPS_CENTER_AUTH_ENABLED=true)
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/v1/hosts", response_model=ListHostsResponse)
-def hosts_list() -> ListHostsResponse:
-    return list_hosts_handler()
+@app.post("/api/v1/checks/run", dependencies=[Depends(require_auth)])
+def checks_run(payload: RunCheckRequest) -> RunCheckResponse:
+    return run_check(payload)
 
 
-@app.get("/api/v1/services", response_model=ListServicesResponse)
-def services_list() -> ListServicesResponse:
-    return list_services_handler()
+@app.post("/api/v1/checks/{check_id}/run", dependencies=[Depends(require_auth)])
+def checks_run_registered(
+    check_id: str, payload: RunRegisteredCheckRequest
+) -> RunRegisteredCheckResponse:
+    return run_registered_check(check_id, payload)
+
+
+@app.post("/api/v1/scheduler/run", dependencies=[Depends(require_auth)])
+def scheduler_run() -> SchedulerRunResponse:
+    return run_scheduler()
+
+
+@app.post("/api/v1/checks/{check_id}/acknowledge", dependencies=[Depends(require_auth)])
+def checks_acknowledge(
+    check_id: str, payload: AcknowledgeRequest
+) -> AcknowledgeResponse:
+    return acknowledge_check(check_id, payload)
+
+
+@app.post("/api/v1/checks/{check_id}/comments", dependencies=[Depends(require_auth)])
+def checks_comments(
+    check_id: str, payload: CommentRequest
+) -> CommentResponse:
+    return add_comment(check_id, payload)
+
+
+@app.post("/api/v1/checks/{check_id}/downtimes", dependencies=[Depends(require_auth)])
+def checks_create_downtime(
+    check_id: str, payload: CreateDowntimeRequest
+) -> CreateDowntimeResponse:
+    return create_downtime(check_id, payload)

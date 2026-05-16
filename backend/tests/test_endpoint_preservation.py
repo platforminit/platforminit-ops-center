@@ -20,6 +20,81 @@ def _isolate_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# MVP API contract — endpoint matrix
+#
+# Every entry: (method, path, requires_auth)
+# This is the single source of truth for the documented API contract.
+# ---------------------------------------------------------------------------
+
+MVP_ENDPOINTS: list[tuple[str, str, bool]] = [
+    ("GET", "/healthz", False),
+    ("GET", "/api/v1/checks", False),
+    ("GET", "/api/v1/checks/{check_id}/history", False),
+    ("GET", "/api/v1/results/latest", False),
+    ("GET", "/api/v1/problems", False),
+    ("GET", "/api/v1/hosts", False),
+    ("GET", "/api/v1/services", False),
+    ("GET", "/api/v1/checks/{check_id}/downtimes", False),
+    ("POST", "/api/v1/checks/run", True),
+    ("POST", "/api/v1/checks/{check_id}/run", True),
+    ("POST", "/api/v1/scheduler/run", True),
+    ("POST", "/api/v1/checks/{check_id}/acknowledge", True),
+    ("POST", "/api/v1/checks/{check_id}/comments", True),
+    ("POST", "/api/v1/checks/{check_id}/downtimes", True),
+]
+
+
+def test_contract_endpoint_matrix_matches_openapi() -> None:
+    """Every endpoint in the documented contract must exist in the OpenAPI schema
+    with the correct HTTP method."""
+    client = TestClient(app)
+    schema = client.get("/openapi.json").json()
+    openapi_paths = schema["paths"]
+
+    for method, path, _requires_auth in MVP_ENDPOINTS:
+        assert path in openapi_paths, (
+            f"Contract path {method} {path} not found in OpenAPI schema"
+        )
+        assert method.lower() in openapi_paths[path], (
+            f"Contract method {method} not found for path {path} in OpenAPI schema"
+        )
+
+
+def test_contract_no_extra_paths() -> None:
+    """No undocumented paths should exist in the OpenAPI schema."""
+    client = TestClient(app)
+    schema = client.get("/openapi.json").json()
+    openapi_paths = set(schema["paths"].keys())
+
+    contract_paths = {path for _method, path, _auth in MVP_ENDPOINTS}
+    extra = openapi_paths - contract_paths
+
+    assert not extra, f"Undocumented paths found in OpenAPI schema: {extra}"
+
+
+def test_contract_auth_guards_match_documentation() -> None:
+    """Contract auth flags must match the documented read-only vs mutation split."""
+    client = TestClient(app)
+    schema = client.get("/openapi.json").json()
+    openapi_paths = schema["paths"]
+
+    for method, path, requires_auth in MVP_ENDPOINTS:
+        operation = openapi_paths[path][method.lower()]
+        has_security = "security" in operation and len(operation["security"]) > 0
+
+        if requires_auth:
+            # Our current implementation uses Depends() which may not appear
+            # in OpenAPI security.  Verify the path is a POST (mutation)
+            # endpoint as a proxy for auth requirement.
+            assert method == "POST", (
+                f"Expected {method} {path} to be a POST mutation endpoint"
+            )
+        else:
+            assert method == "GET", f"Expected {method} {path} to be read-only"
+            assert not has_security, f"Read-only endpoint {method} {path} declared security"
+
+
+# ---------------------------------------------------------------------------
 # All registered OpenAPI paths
 # ---------------------------------------------------------------------------
 

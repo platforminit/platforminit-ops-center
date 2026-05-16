@@ -303,12 +303,18 @@ def run_registered_check(check_id: str, payload: RunRegisteredCheckRequest) -> R
 
 
 class CheckResultEntry(BaseModel):
+    """Public response entry for check history/latest results.
+
+    Intentionally omits ``command`` and ``stderr`` to avoid leaking
+    internal execution details.  The store layer retains the full
+    ``PluginResult`` internally.
+    """
+
     id: int
     check_id: str
     status: str
     output: str
     perfdata: str | None
-    stderr: str | None
     exit_code: int
     duration_seconds: float
     timed_out: bool
@@ -325,13 +331,13 @@ class LatestResultsResponse(BaseModel):
 
 
 def _entry_from_record(record: CheckResultRecord) -> CheckResultEntry:
+    """Map a store record to a public response entry, dropping internal fields."""
     return CheckResultEntry(
         id=record.id,
         check_id=record.check_id,
         status=record.status,
         output=record.output,
         perfdata=record.perfdata,
-        stderr=record.stderr,
         exit_code=record.exit_code,
         duration_seconds=record.duration_seconds,
         timed_out=record.timed_out,

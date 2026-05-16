@@ -1,0 +1,249 @@
+# =============================================================================
+# PlatformInit Ops Center — Helm values
+# =============================================================================
+# This file contains the default configuration for the Ops Center chart.
+# Override any value in a custom values file or via --set on the command line.
+
+# ---------------------------------------------------------------------------
+# Global settings
+# ---------------------------------------------------------------------------
+global:
+  # Kubernetes cluster domain (used for internal DNS lookups)
+  clusterDomain: cluster.local
+
+# ---------------------------------------------------------------------------
+# Namespace
+# ---------------------------------------------------------------------------
+namespaceOverride: ""
+
+# ---------------------------------------------------------------------------
+# Image registry and pull policy
+# ---------------------------------------------------------------------------
+imagePullSecrets: []
+imagePullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# API component
+# ---------------------------------------------------------------------------
+api:
+  enabled: true
+
+  image:
+    repository: ghcr.io/platforminit/ops-center-api
+    tag: "0.1.0"
+    # Override pullPolicy per component if needed
+    pullPolicy: ""
+
+  nameOverride: ""
+  fullnameOverride: ""
+
+  replicas: 1
+
+  # Service account
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # Pod-level security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    fsGroup: 1001
+
+  # Container-level security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http-api
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Liveness probe
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: 8000
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  # Environment variables (non-sensitive)
+  env:
+    - name: PYTHONUNBUFFERED
+      value: "1"
+    - name: OPS_CENTER_DB_PATH
+      value: /data/ops-center.db
+
+  # Writable scratch storage for development/runtime state.
+  # Replace with a PersistentVolumeClaim when persistence requirements are defined.
+  extraVolumeMounts:
+    - name: api-data
+      mountPath: /data
+  extraVolumes:
+    - name: api-data
+      emptyDir: {}
+
+  # Annotations and labels
+  podAnnotations: {}
+  podLabels: {}
+
+  # Node selector, tolerations, affinity
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# UI component
+# ---------------------------------------------------------------------------
+ui:
+  enabled: true
+
+  image:
+    repository: ghcr.io/platforminit/ops-center-ui
+    tag: "0.1.0"
+    pullPolicy: ""
+
+  nameOverride: ""
+  fullnameOverride: ""
+
+  replicas: 1
+
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http-ui
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  # Liveness probe
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 15
+
+  # Readiness probe
+  readinessProbe:
+    httpGet:
+      path: /
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  # Environment variables (non-sensitive)
+  env: []
+
+  # nginx-unprivileged requires writable runtime/cache directories when the
+  # container root filesystem is read-only.
+  extraVolumeMounts:
+    - name: ui-cache
+      mountPath: /var/cache/nginx
+    - name: ui-run
+      mountPath: /var/run
+    - name: ui-tmp
+      mountPath: /tmp
+  extraVolumes:
+    - name: ui-cache
+      emptyDir: {}
+    - name: ui-run
+      emptyDir: {}
+    - name: ui-tmp
+      emptyDir: {}
+
+  podAnnotations: {}
+  podLabels: {}
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  # Enabled by default? No — user must opt in.
+  enabled: false
+
+  # Ingress class name (e.g. nginx, traefik, contour)
+  className: ""
+
+  # Annotations (e.g. cert-manager, external-dns)
+  annotations:
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    {}
+
+  # TLS configuration
+  tls:
+    # - hosts:
+    #     - ops-center.example.com
+    #   secretName: ops-center-tls
+    []
+
+  # Hosts and paths
+  hosts:
+    - host: ops-center.platforminit.dev
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: api
+              port:
+                number: 8000
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: ui
+              port:
+                number: 8080

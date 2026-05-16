@@ -1,0 +1,50 @@
+{{- if .Values.ingress.enabled -}}
+{{- $ingressApiIsStable := eq (include "platforminit-ops-center.ingress.isStable" .) "true" -}}
+{{- $ingressApiVersion := include "platforminit-ops-center.ingress.apiVersion" . -}}
+apiVersion: {{ $ingressApiVersion }}
+kind: Ingress
+metadata:
+  name: {{ include "platforminit-ops-center.fullname" . }}
+  labels:
+    {{- include "platforminit-ops-center.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if and $ingressApiIsStable .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            {{- if $ingressApiIsStable }}
+            pathType: {{ .pathType }}
+            {{- end }}
+            backend:
+              {{- if $ingressApiIsStable }}
+              service:
+                name: {{ include "platforminit-ops-center.fullname" $ }}-{{ .backend.service.name }}
+                port:
+                  number: {{ .backend.service.port.number }}
+              {{- else }}
+              serviceName: {{ include "platforminit-ops-center.fullname" $ }}-{{ .backend.service.name }}
+              servicePort: {{ .backend.service.port.number }}
+              {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

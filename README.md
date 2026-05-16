@@ -46,3 +46,38 @@ curl -s http://localhost:8080/
 > **Note:** These builds do not require Docker Desktop. Only Podman (or an
 > equivalent OCI-compatible runtime) is needed. No secrets are baked into the
 > images.
+
+## Helm chart
+
+A Helm chart for deploying Ops Center to Kubernetes is available under
+[`charts/platforminit-ops-center/`](charts/platforminit-ops-center/Chart.yaml).
+
+### Lint the chart
+
+```bash
+helm lint charts/platforminit-ops-center/
+```
+
+### Render templates locally
+
+```bash
+helm template ops-center charts/platforminit-ops-center/ \
+  --values deploy/dev/values.yaml \
+  --namespace platforminit-ops-center-dev
+```
+
+### Deploy to dev (dry-run first)
+
+```bash
+helm upgrade --install ops-center charts/platforminit-ops-center/ \
+  --values deploy/dev/values.yaml \
+  --namespace platforminit-ops-center-dev \
+  --create-namespace \
+  --dry-run
+```
+
+> **Note:** Ingress is disabled by default. Enable it in
+> [`deploy/dev/values.yaml`](deploy/dev/values.yaml) when a domain and TLS
+> certificate are available for the dev environment. No real secrets are
+> included in the chart — use external secret management (e.g. SealedSecrets,
+> External Secrets Operator) for production.

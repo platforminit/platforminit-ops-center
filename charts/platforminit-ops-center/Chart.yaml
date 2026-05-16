@@ -1,0 +1,14 @@
+apiVersion: v2
+name: platforminit-ops-center
+description: A Helm chart for deploying PlatformInit Ops Center on Kubernetes
+type: application
+
+# Chart and app version
+version: 0.1.0
+appVersion: "0.1.0"
+
+# Minimum Kubernetes version
+kubeVersion: ">=1.28.0"
+
+# Optional: dependencies could be added later (e.g. PostgreSQL, Redis)
+dependencies: []

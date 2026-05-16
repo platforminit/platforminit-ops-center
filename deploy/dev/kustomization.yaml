@@ -1,0 +1,27 @@
+# =============================================================================
+# deploy/dev/kustomization.yaml
+# =============================================================================
+# Kustomize overlay for deploying the Ops Center Helm chart to the dev
+# environment (platforminit-dev-01).
+#
+# Usage:
+#   helm template ops-center ../../charts/platforminit-ops-center \
+#     --values values.yaml \
+#     --namespace platforminit-ops-center-dev \
+#     | kubectl apply -f -
+#
+# Or with Helm directly:
+#   helm upgrade --install ops-center ../../charts/platforminit-ops-center \
+#     --values values.yaml \
+#     --namespace platforminit-ops-center-dev \
+#     --create-namespace
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: platforminit-ops-center
+    releaseName: ops-center
+    namespace: platforminit-ops-center-dev
+    includeCRDs: false
+    valuesFile: values.yaml

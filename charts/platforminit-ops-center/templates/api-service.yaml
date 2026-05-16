@@ -1,0 +1,19 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "platforminit-ops-center.fullname" . }}-api
+  labels:
+    {{- include "platforminit-ops-center.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: {{ .Values.api.service.targetPort }}
+      protocol: {{ .Values.api.service.protocol }}
+      name: {{ .Values.api.service.name }}
+  selector:
+    {{- include "platforminit-ops-center.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}

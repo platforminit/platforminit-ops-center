@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import PurePosixPath
+from types import MappingProxyType
+from typing import Mapping
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -18,41 +21,6 @@ from app.store.check_results import (
 
 ALLOWED_PLUGIN_DIR = PurePosixPath("/usr/lib/nagios/plugins")
 ALLOWED_PREFIX = f"{ALLOWED_PLUGIN_DIR}/"
-
-# ---------------------------------------------------------------------------
-# In-memory check registry
-# ---------------------------------------------------------------------------
-
-_CHECK_REGISTRY: dict[str, tuple[str, ...]] = {
-    "http-example": (
-        "/usr/lib/nagios/plugins/check_http",
-        "-H",
-        "example.com",
-    ),
-    "disk-root": (
-        "/usr/lib/nagios/plugins/check_disk",
-        "-w",
-        "20%",
-        "-c",
-        "10%",
-        "-p",
-        "/",
-    ),
-}
-
-
-def get_registered_checks() -> dict[str, list[str]]:
-    """Return command copies so callers cannot mutate the registry."""
-    return {
-        check_id: list(command)
-        for check_id, command in _CHECK_REGISTRY.items()
-    }
-
-
-def get_registered_command(check_id: str) -> list[str] | None:
-    """Return the command list for *check_id*, or *None* if unknown."""
-    command = _CHECK_REGISTRY.get(check_id)
-    return list(command) if command is not None else None
 
 
 def validate_command_list(command: list[str]) -> list[str]:
@@ -77,6 +45,94 @@ def validate_command_list(command: list[str]) -> list[str]:
         raise ValueError(f"command[0] must be an absolute path under {ALLOWED_PREFIX}")
 
     return command
+
+# ---------------------------------------------------------------------------
+# In-memory check registry — metadata-rich definitions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CheckDefinition:
+    """Immutable metadata definition for a registered check."""
+
+    check_id: str
+    name: str
+    description: str
+    category: str
+    severity: str
+    runbook_url: str
+    interval_seconds: int
+
+
+@dataclass(frozen=True)
+class _RegisteredCheckDefinition:
+    """Internal immutable definition containing metadata and command details."""
+
+    metadata: CheckDefinition
+    command: tuple[str, ...]
+
+
+_CHECK_DEFINITIONS: tuple[_RegisteredCheckDefinition, ...] = (
+    _RegisteredCheckDefinition(
+        metadata=CheckDefinition(
+            check_id="http-example",
+            name="HTTP Example",
+            description="Check that example.com returns HTTP 200 OK",
+            category="web",
+            severity="critical",
+            runbook_url="https://example.com/runbooks/http-example",
+            interval_seconds=300,
+        ),
+        command=(
+            "/usr/lib/nagios/plugins/check_http",
+            "-H",
+            "example.com",
+        ),
+    ),
+    _RegisteredCheckDefinition(
+        metadata=CheckDefinition(
+            check_id="disk-root",
+            name="Disk Root",
+            description="Check available disk space on root filesystem",
+            category="system",
+            severity="warning",
+            runbook_url="https://example.com/runbooks/disk-root",
+            interval_seconds=600,
+        ),
+        command=(
+            "/usr/lib/nagios/plugins/check_disk",
+            "-w",
+            "20%",
+            "-c",
+            "10%",
+            "-p",
+            "/",
+        ),
+    ),
+)
+
+
+for definition in _CHECK_DEFINITIONS:
+    validate_command_list(list(definition.command))
+
+
+_CHECK_REGISTRY: Mapping[str, CheckDefinition] = MappingProxyType(
+    {definition.metadata.check_id: definition.metadata for definition in _CHECK_DEFINITIONS}
+)
+_CHECK_COMMANDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {definition.metadata.check_id: definition.command for definition in _CHECK_DEFINITIONS}
+)
+
+
+def get_registered_checks() -> Mapping[str, CheckDefinition]:
+    """Return immutable registry metadata without command details."""
+    return _CHECK_REGISTRY
+
+
+def get_registered_command(check_id: str) -> list[str] | None:
+    """Return the command list for *check_id*, or *None* if unknown."""
+    command = _CHECK_COMMANDS.get(check_id)
+    return list(command) if command is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -111,19 +167,36 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
 # ---------------------------------------------------------------------------
 
 
-class CheckEntry(BaseModel):
+class CheckMetadata(BaseModel):
     check_id: str
+    name: str
+    description: str
+    category: str
+    severity: str
+    runbook_url: str
+    interval_seconds: int
 
 
 class ListChecksResponse(BaseModel):
-    checks: list[CheckEntry]
+    checks: list[CheckMetadata]
 
 
 def list_checks() -> ListChecksResponse:
     return ListChecksResponse(
         checks=[
-            CheckEntry(check_id=check_id)
-            for check_id in sorted(get_registered_checks())
+            CheckMetadata(
+                check_id=defn.check_id,
+                name=defn.name,
+                description=defn.description,
+                category=defn.category,
+                severity=defn.severity,
+                runbook_url=defn.runbook_url,
+                interval_seconds=defn.interval_seconds,
+            )
+            for defn in sorted(
+                get_registered_checks().values(),
+                key=lambda d: d.check_id,
+            )
         ]
     )
 

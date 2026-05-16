@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.checks import get_registered_checks
 from app.main import app
 from app.runner.models import CheckStatus, PluginResult
 
@@ -221,7 +223,7 @@ def test_checks_run_too_many_elements_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# New: GET /api/v1/checks tests
+# GET /api/v1/checks — metadata listing tests
 # ---------------------------------------------------------------------------
 
 
@@ -239,12 +241,59 @@ def test_checks_list_returns_registered_checks() -> None:
     assert "http-example" in check_ids
     assert "disk-root" in check_ids
 
-    # Registered check listing should not expose raw executable arguments.
+
+def test_checks_list_metadata_fields() -> None:
+    """Each check entry exposes all required metadata fields."""
+    client = TestClient(app)
+    response = client.get("/api/v1/checks")
+    assert response.status_code == 200
+    checks = response.json()["checks"]
+
     http_entry = next(c for c in checks if c["check_id"] == "http-example")
-    assert "command" not in http_entry
+
+    assert http_entry["name"] == "HTTP Example"
+    assert http_entry["description"] == "Check that example.com returns HTTP 200 OK"
+    assert http_entry["category"] == "web"
+    assert http_entry["severity"] == "critical"
+    assert http_entry["runbook_url"] == "https://example.com/runbooks/http-example"
+    assert http_entry["interval_seconds"] == 300
 
     disk_entry = next(c for c in checks if c["check_id"] == "disk-root")
-    assert "command" not in disk_entry
+
+    assert disk_entry["name"] == "Disk Root"
+    assert disk_entry["description"] == "Check available disk space on root filesystem"
+    assert disk_entry["category"] == "system"
+    assert disk_entry["severity"] == "warning"
+    assert disk_entry["runbook_url"] == "https://example.com/runbooks/disk-root"
+    assert disk_entry["interval_seconds"] == 600
+
+
+def test_checks_list_does_not_expose_command() -> None:
+    """Registered check listing must not expose raw command details."""
+    client = TestClient(app)
+    response = client.get("/api/v1/checks")
+    assert response.status_code == 200
+    checks = response.json()["checks"]
+
+    for entry in checks:
+        assert "command" not in entry, (
+            f"check '{entry['check_id']}' must not expose 'command'"
+        )
+
+    assert "/usr/lib/nagios/plugins" not in response.text
+
+
+def test_registered_check_metadata_is_immutable_and_commandless() -> None:
+    registry = get_registered_checks()
+
+    with pytest.raises(TypeError):
+        registry["new-check"] = registry["http-example"]  # type: ignore[index]
+
+    http_entry = registry["http-example"]
+    assert not hasattr(http_entry, "command")
+
+    with pytest.raises(FrozenInstanceError):
+        http_entry.name = "Changed"  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------

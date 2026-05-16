@@ -9,12 +9,14 @@ from app.api.checks import (
     ListChecksResponse,
     RunRegisteredCheckRequest,
     RunRegisteredCheckResponse,
+    SchedulerRunResponse,
     check_history,
     latest_results,
     list_checks,
     list_problems,
     run_check,
     run_registered_check,
+    run_scheduler,
 )
 from app.store.check_results import DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT
 
@@ -59,3 +61,8 @@ def results_latest() -> LatestResultsResponse:
 @app.get("/api/v1/problems", response_model=ProblemsResponse)
 def problems_list() -> ProblemsResponse:
     return list_problems()
+
+
+@app.post("/api/v1/scheduler/run", response_model=SchedulerRunResponse)
+def scheduler_run() -> SchedulerRunResponse:
+    return run_scheduler()

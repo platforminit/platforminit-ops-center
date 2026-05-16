@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.runner.nagios import run_nagios_plugin
 from app.runner.models import PluginResult
+from app.scheduler.service import run_due_checks
 from app.store.check_results import (
     DEFAULT_HISTORY_LIMIT,
     CheckResultRecord,
@@ -327,5 +328,37 @@ def list_problems() -> ProblemsResponse:
         problems=[
             _problem_entry_from_record(record)
             for record in get_problems(check_ids)
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# New: POST /api/v1/scheduler/run
+# ---------------------------------------------------------------------------
+
+
+class SchedulerRunResponse(BaseModel):
+    executed: list[SchedulerRunEntry]
+
+
+class SchedulerRunEntry(BaseModel):
+    check_id: str
+    status: str
+    output: str
+    duration_seconds: float
+
+
+def run_scheduler() -> SchedulerRunResponse:
+    """Run all due registered checks and return the results."""
+    results = run_due_checks()
+    return SchedulerRunResponse(
+        executed=[
+            SchedulerRunEntry(
+                check_id=check_id,
+                status=result.status.value,
+                output=result.output,
+                duration_seconds=result.duration_seconds,
+            )
+            for check_id, result in results
         ]
     )

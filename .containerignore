@@ -1,0 +1,29 @@
+# =============================================================================
+# .containerignore — Global build-context exclusions for Podman/Docker
+# =============================================================================
+*
+!backend/
+!frontend/
+!scripts/
+!Makefile
+!README.md
+
+# Exclude development artifacts inside subdirectories
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.venv
+**/node_modules
+**/dist
+**/build
+**/.vite
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.env
+**/.env.*
+**/*.sqlite
+**/*.sqlite3
+**/data/
+**/*.log

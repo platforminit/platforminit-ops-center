@@ -1,0 +1,24 @@
+# =============================================================================
+# backend/.containerignore — Backend build-context exclusions
+# =============================================================================
+*
+!pyproject.toml
+!uv.lock
+!app/
+!tests/
+
+# Development & local data
+__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.venv
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+*.sqlite
+*.sqlite3
+data/
+*.log

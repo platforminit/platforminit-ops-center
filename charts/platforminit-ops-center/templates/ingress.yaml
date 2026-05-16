@@ -1,6 +1,9 @@
 {{- if .Values.ingress.enabled -}}
 {{- $ingressApiIsStable := eq (include "platforminit-ops-center.ingress.isStable" .) "true" -}}
 {{- $ingressApiVersion := include "platforminit-ops-center.ingress.apiVersion" . -}}
+{{- if and (not .Values.ingress.tls) (or (not (kindIs "slice" .Values.ingress.tls)) (eq (len .Values.ingress.tls) 0)) -}}
+{{- fail "ingress.enabled=true requires ingress.tls to be configured. Set ingress.tls with at least one host/secretName entry." -}}
+{{- end -}}
 apiVersion: {{ $ingressApiVersion }}
 kind: Ingress
 metadata:

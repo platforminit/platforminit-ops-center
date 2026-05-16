@@ -39,11 +39,293 @@ def _isolate_results_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# Existing POST /api/v1/checks/run tests (unchanged)
+# Auth tests
+# ---------------------------------------------------------------------------
+
+
+def _enable_auth(monkeypatch: pytest.MonkeyPatch, token: str = "test-token") -> None:
+    monkeypatch.setenv("OPS_CENTER_AUTH_ENABLED", "true")
+    monkeypatch.setenv("OPS_CENTER_API_TOKEN", token)
+
+
+def test_auth_disabled_allows_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When auth is disabled, mutation endpoints should work."""
+    monkeypatch.delenv("OPS_CENTER_AUTH_ENABLED", raising=False)
+    monkeypatch.delenv("OPS_CENTER_API_TOKEN", raising=False)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/run",
+        json={
+            "command": ["/usr/lib/nagios/plugins/check_http", "-H", "example.com"],
+            "timeout_seconds": 10,
+        },
+    )
+
+    assert response.status_code in (200, 403)  # 403 if ad-hoc disabled
+
+
+def test_auth_enabled_missing_token_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When auth is enabled, missing Authorization header returns 401."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+    )
+
+    assert response.status_code == 401
+
+
+def test_auth_enabled_invalid_token_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When auth is enabled, invalid token returns 401."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_auth_enabled_valid_token_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """When auth is enabled, valid token allows the request."""
+    _enable_auth(monkeypatch)
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_auth_enabled_empty_bearer_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When auth is enabled, empty Bearer token returns 401."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+        headers={"Authorization": "Bearer "},
+    )
+
+    assert response.status_code == 401
+
+
+def test_auth_enabled_no_bearer_prefix_returns_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When auth is enabled, missing Bearer prefix returns 401."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+        headers={"Authorization": "test-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_auth_healthz_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Health endpoint should remain accessible when auth is enabled."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_auth_checks_list_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /api/v1/checks should remain accessible when auth is enabled."""
+    _enable_auth(monkeypatch)
+
+    client = TestClient(app)
+    response = client.get("/api/v1/checks")
+
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Ad-hoc check gating tests
+# ---------------------------------------------------------------------------
+
+
+def test_adhoc_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ad-hoc check execution should be disabled by default."""
+    monkeypatch.delenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", raising=False)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/run",
+        json={
+            "command": ["/usr/lib/nagios/plugins/check_http", "-H", "example.com"],
+            "timeout_seconds": 10,
+        },
+    )
+
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"].lower()
+
+
+def test_adhoc_enabled_when_flag_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ad-hoc check execution should work when explicitly enabled."""
+    monkeypatch.setenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", "true")
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/run",
+        json={
+            "command": ["/usr/lib/nagios/plugins/check_http", "-H", "example.com"],
+            "timeout_seconds": 10,
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_registered_check_still_works_when_adhoc_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Registered check execution should work even when ad-hoc is disabled."""
+    monkeypatch.delenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", raising=False)
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(command)
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+    )
+
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Public response model tests — command and stderr must not be exposed
+# ---------------------------------------------------------------------------
+
+
+def test_adhoc_response_does_not_expose_command_or_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ad-hoc check response must not contain command or stderr."""
+    monkeypatch.setenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", "true")
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+            stderr="connection refused",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/run",
+        json={
+            "command": ["/usr/lib/nagios/plugins/check_http", "-H", "example.com"],
+            "timeout_seconds": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    result = body["result"]
+
+    assert "command" not in result, "Public response must not expose 'command'"
+    assert "stderr" not in result, "Public response must not expose 'stderr'"
+    assert result["exit_code"] == 2
+    assert result["status"] == "CRITICAL"
+    assert result["output"] == "HTTP CRITICAL"
+    assert result["duration_seconds"] >= 0
+    assert result["timed_out"] is False
+
+
+def test_registered_check_response_does_not_expose_command_or_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Registered check response must not contain command or stderr."""
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+            stderr="connection refused",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/checks/http-example/run",
+        json={"timeout_seconds": 10},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    result = body["result"]
+
+    assert "command" not in result, "Public response must not expose 'command'"
+    assert "stderr" not in result, "Public response must not expose 'stderr'"
+    assert result["exit_code"] == 2
+    assert result["status"] == "CRITICAL"
+    assert result["output"] == "HTTP CRITICAL"
+
+
+# ---------------------------------------------------------------------------
+# Existing POST /api/v1/checks/run tests (updated for public response model)
 # ---------------------------------------------------------------------------
 
 
 def test_checks_run_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", "true")
+
     def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
         return _fake_result(command)
 
@@ -67,10 +349,13 @@ def test_checks_run_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "HTTP OK" in result["output"]
     assert result["timed_out"] is False
     assert result["duration_seconds"] >= 0
-    assert result["command"] == ["/usr/lib/nagios/plugins/check_http", "-H", "example.com"]
+    # command must NOT be in public response
+    assert "command" not in result
 
 
 def test_checks_run_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", "true")
+
     def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
         return _fake_result(
             command=command,
@@ -325,11 +610,8 @@ def test_checks_run_registered_ok(
 
     assert result["status"] == "OK"
     assert result["exit_code"] == 0
-    assert result["command"] == [
-        "/usr/lib/nagios/plugins/check_http",
-        "-H",
-        "example.com",
-    ]
+    # command must NOT be in public response
+    assert "command" not in result
 
 
 def test_checks_run_registered_unknown_check_id() -> None:
@@ -367,15 +649,6 @@ def test_checks_run_registered_disk_root(
     result = body["result"]
 
     assert result["status"] == "OK"
-    assert result["command"] == [
-        "/usr/lib/nagios/plugins/check_disk",
-        "-w",
-        "20%",
-        "-c",
-        "10%",
-        "-p",
-        "/",
-    ]
     assert "DISK OK" in result["output"]
 
 
@@ -426,6 +699,7 @@ def test_checks_run_raw_ad_hoc_does_not_persist(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,
 ) -> None:
+    monkeypatch.setenv("OPS_CENTER_ENABLE_ADHOC_CHECKS", "true")
     database_path = tmp_path / "check-results.sqlite3"
     monkeypatch.setenv("PLATFORMINIT_CHECK_RESULTS_DB", str(database_path))
 
@@ -1329,7 +1603,6 @@ def test_problems_shows_in_downtime_flag(
     assert problem["in_downtime"] is False
 
     # Create an active downtime window using a fixed reference time
-    # Use a fixed "now" to avoid timestamp comparison race conditions
     from datetime import datetime, timedelta, timezone
 
     now = datetime.now(timezone.utc)

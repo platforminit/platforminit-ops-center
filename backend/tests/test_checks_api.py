@@ -721,6 +721,96 @@ def test_checks_run_raw_ad_hoc_does_not_persist(
     assert not database_path.exists()
 
 
+def test_checks_history_response_does_not_expose_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """History response entries must not contain stderr."""
+    database_path = tmp_path / "check-results.sqlite3"
+    monkeypatch.setenv("PLATFORMINIT_CHECK_RESULTS_DB", str(database_path))
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+            stderr="connection refused",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.get("/api/v1/checks/http-example/history")
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) >= 1
+    for entry in results:
+        assert "stderr" not in entry, "History entry must not expose 'stderr'"
+        assert "command" not in entry, "History entry must not expose 'command'"
+
+
+def test_latest_results_response_does_not_expose_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Latest results response entries must not contain stderr."""
+    database_path = tmp_path / "check-results.sqlite3"
+    monkeypatch.setenv("PLATFORMINIT_CHECK_RESULTS_DB", str(database_path))
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+            stderr="connection refused",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    client.post("/api/v1/checks/http-example/run", json={"timeout_seconds": 10})
+
+    response = client.get("/api/v1/results/latest")
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) >= 1
+    for entry in results:
+        assert "stderr" not in entry, "Latest result entry must not expose 'stderr'"
+        assert "command" not in entry, "Latest result entry must not expose 'command'"
+
+
+def test_scheduler_run_response_does_not_expose_command_or_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """Scheduler run response entries must not contain command or stderr."""
+    _isolate_results_db(monkeypatch, tmp_path)
+
+    def fake_run(command: list[str], timeout_seconds: int = 10) -> PluginResult:
+        return _fake_result(
+            command,
+            exit_code=2,
+            status=CheckStatus.CRITICAL,
+            output="HTTP CRITICAL",
+            stderr="connection refused",
+        )
+
+    monkeypatch.setattr("app.api.checks.run_nagios_plugin", fake_run)
+
+    client = TestClient(app)
+    response = client.post("/api/v1/scheduler/run")
+    assert response.status_code == 200
+    executed = response.json()["executed"]
+    assert len(executed) >= 1
+    for entry in executed:
+        assert "command" not in entry, "Scheduler entry must not expose 'command'"
+        assert "stderr" not in entry, "Scheduler entry must not expose 'stderr'"
+
+
 def test_checks_history_returns_persisted_results_newest_first(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pytest.TempPathFactory,

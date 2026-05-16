@@ -6,6 +6,8 @@ When enabled, requires ``Authorization: Bearer <token>`` on sensitive endpoints.
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import HTTPException, Request, status
 
 from app.core.config import load_settings
@@ -20,6 +22,9 @@ async def require_auth(request: Request) -> None:
     If enabled, the request **must** include an ``Authorization: Bearer
     <token>`` header whose value matches ``OPS_CENTER_API_TOKEN``.
     Missing or invalid tokens result in a 401 response.
+
+    Token comparison uses ``secrets.compare_digest()`` to prevent
+    timing side-channel attacks on the bearer token.
     """
     settings = load_settings()
 
@@ -51,7 +56,7 @@ async def require_auth(request: Request) -> None:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if provided_token != token:
+    if not secrets.compare_digest(provided_token, token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API token",
